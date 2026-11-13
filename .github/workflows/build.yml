@@ -24,7 +24,7 @@ jobs:
       - name: Extract Android Project
         run: |
           mkdir extracted
-          ZIP_FILE="./CashCounter.zip"
+          ZIP_FILE="./CashCounterNew.zip"
           if [ ! -f "$ZIP_FILE" ]; then
             echo "CashCounter.zip not found"
             exit 1
