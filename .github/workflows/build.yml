@@ -1,0 +1,55 @@
+
+name: AI Cash Counter APK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract Android Project
+        run: |
+          mkdir extracted
+          ZIP_FILE=$(find . -maxdepth 1 -iname '*.zip' -print -quit)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Android ZIP not found"
+            exit 1
+          fi
+          unzip -q "$ZIP_FILE" -d extracted
+          PROJECT_DIR=$(dirname "$(find extracted -name settings.gradle.kts -print -quit)")
+          if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/gradlew" ]; then
+            echo "Gradle wrapper or Android project missing"
+            find extracted -maxdepth 4 -type f
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: |
+          cd "$PROJECT_DIR"
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Cash-Counter-APK
+          path: extracted/**/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
