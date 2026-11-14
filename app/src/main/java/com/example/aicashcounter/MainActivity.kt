@@ -3,260 +3,472 @@ package com.example.aicashcounter
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Typeface
-import android.net.Uri
+import android.graphics.Color
 import android.os.Bundle
-import android.text.InputType
-import android.view.Gravity
-import android.widget.*
-import android.text.TextWatcher
 import android.text.Editable
+import android.text.TextWatcher
+import android.view.Gravity
+import android.view.View
+import android.widget.*
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity() {
 
+    private val navy = Color.rgb(10, 19, 36)
+    private val panel = Color.rgb(22, 35, 55)
+    private val emerald = Color.rgb(0, 190, 130)
+    private val white = Color.WHITE
+    private val muted = Color.rgb(165, 180, 198)
+
     private val denominations = listOf(500, 200, 100, 50, 20, 10, 5, 2, 1)
     private val counts = mutableMapOf<Int, Int>()
     private val inputs = mutableMapOf<Int, EditText>()
+    private val amountLabels = mutableMapOf<Int, TextView>()
 
+    private lateinit var root: LinearLayout
+    private lateinit var content: LinearLayout
     private lateinit var totalText: TextView
-    private lateinit var denominationText: TextView
+    private lateinit var notesText: TextView
     private lateinit var comparisonText: TextView
     private lateinit var extraInput: EditText
+    private lateinit var extraTotalText: TextView
 
     private var extra = 0.0
+    private var calculatorResult = 0.0
+    private var currentScreen = "COUNTER"
+
     private val prefs by lazy {
         getSharedPreferences("cash_counter", MODE_PRIVATE)
     }
 
-    private fun dp(n: Int): Int =
-        (n * resources.displayMetrics.density).toInt()
-
-    private fun text(
-        value: String,
-        size: Float = 16f,
-        bold: Boolean = false
-    ) = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(0xFF17251E.toInt())
-        if (bold) setTypeface(null, Typeface.BOLD)
-        setPadding(dp(4), dp(7), dp(4), dp(7))
-    }
-
-    private fun button(
-        value: String,
-        action: () -> Unit
-    ) = Button(this).apply {
-        text = value
-        isAllCaps = false
-        setOnClickListener { action() }
-    }
-
-    private fun section(value: String) = text(value, 18f, true).apply {
-        setPadding(dp(4), dp(18), dp(4), dp(8))
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        denominations.forEach { counts[it] = 0 }
-        buildScreen()
-        refresh()
+        window.statusBarColor = navy
+        window.navigationBarColor = navy
+        loadCounts()
+        showApp()
     }
 
-    private fun buildScreen() {
-        val page = LinearLayout(this).apply {
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
+    private fun makeText(
+        value: String,
+        size: Float = 15f,
+        color: Int = white,
+        bold: Boolean = false
+    ): TextView {
+        return TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
+            if (bold) setTypeface(null, 1)
+            gravity = Gravity.CENTER_VERTICAL
+        }
+    }
+
+    private fun makeButton(value: String, action: () -> Unit): Button {
+        return Button(this).apply {
+            text = value
+            textSize = 12f
+            setTextColor(white)
+            setBackgroundColor(emerald)
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun makeCard(): LinearLayout {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFF2F6F3.toInt())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setBackgroundColor(panel)
+        }
+    }
+
+    private fun addSpace(parent: LinearLayout, height: Int = 10) {
+        parent.addView(View(this), LinearLayout.LayoutParams(1, dp(height)))
+    }
+
+    private fun showApp() {
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(navy)
         }
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            setBackgroundColor(0xFF0D5C3D.toInt())
+            setPadding(dp(18), dp(14), dp(18), dp(12))
+            setBackgroundColor(navy)
         }
 
-        header.addView(TextView(this).apply {
-            text = "₹ AI CASH COUNTER"
-            textSize = 24f
-            setTextColor(-1)
-            setTypeface(null, Typeface.BOLD)
-        })
+        header.addView(makeText("AI CASH COUNTER", 21f, emerald, true))
+        header.addView(makeText("Smart cash management", 12f, muted))
+        root.addView(header)
 
-        header.addView(TextView(this).apply {
-            text = "Cash • Calculator • Handwritten Scanner"
-            textSize = 13f
-            setTextColor(0xFFD6F1E2.toInt())
-        })
+        content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        root.addView(
+            content,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        )
 
-        page.addView(header)
+        val nav = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setBackgroundColor(panel)
+        }
+
+        nav.addView(
+            makeButton("COUNTER") { showCounter() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        nav.addView(
+            makeButton("CALC") { showCalculator() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        root.addView(nav)
+
+        setContentView(root)
+        showCounter()
+    }
+
+    private fun showCounter() {
+        currentScreen = "COUNTER"
+        content.removeAllViews()
+        inputs.clear()
+        amountLabels.clear()
 
         val scroll = ScrollView(this)
-        val body = LinearLayout(this).apply {
+        val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(24))
         }
+        scroll.addView(page)
+        content.addView(scroll)
 
-        val summary = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            setBackgroundColor(-1)
-        }
-
-        summary.addView(text("GRAND TOTAL", 13f, true))
-        totalText = text("₹0", 32f, true)
+        val summary = makeCard()
+        summary.addView(makeText("TOTAL CASH AMOUNT", 12f, muted, true))
+        totalText = makeText("₹0", 30f, emerald, true)
         summary.addView(totalText)
-        denominationText = text("Denomination Total: ₹0")
-        summary.addView(denominationText)
-        body.addView(summary)
+        notesText = makeText("Total Notes: 0", 14f, white, true)
+        summary.addView(notesText)
+        page.addView(summary)
 
-        body.addView(section("1. CASH DENOMINATION COUNTER"))
+        addSpace(page)
 
-        denominations.forEach { value ->
+        val extraCard = makeCard()
+        extraCard.addView(makeText("EXTRA AMOUNT", 13f, emerald, true))
+
+        extraInput = EditText(this).apply {
+            setTextColor(white)
+            setHintTextColor(muted)
+            hint = "Enter extra amount"
+            inputType = 8194
+            setSingleLine(true)
+            setText(extra.toString())
+            setPadding(dp(10), 0, dp(10), 0)
+            setBackgroundColor(Color.rgb(35, 50, 70))
+        }
+        extraCard.addView(
+            extraInput,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
+            )
+        )
+
+        comparisonText = makeText("COMPARISON: EQUAL TO", 15f, emerald, true)
+        extraCard.addView(comparisonText)
+        extraTotalText = makeText("Grand Total: ₹0", 13f, muted)
+        extraCard.addView(extraTotalText)
+
+        extraInput.addTextChangedListener(watcher {
+            extra = extraInput.text.toString().toDoubleOrNull() ?: 0.0
+            refresh()
+        })
+        page.addView(extraCard)
+
+        addSpace(page)
+
+        val denominationCard = makeCard()
+        denominationCard.addView(
+            makeText("DENOMINATION COUNTER", 15f, emerald, true)
+        )
+        addSpace(denominationCard, 6)
+
+        denominations.forEach { denomination ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(4), dp(8), dp(4))
-                setBackgroundColor(-1)
+                setPadding(0, dp(5), 0, dp(5))
             }
 
             row.addView(
-                text("₹$value", 18f, true),
-                LinearLayout.LayoutParams(0, dp(48), 1f)
+                makeText("₹$denomination", 15f, white, true),
+                LinearLayout.LayoutParams(dp(58), dp(42))
             )
 
-            row.addView(button("−") {
-                setCount(value, (counts[value] ?: 0) - 1)
-            })
+            row.addView(
+                makeButton("−") {
+                    setCount(denomination, (counts[denomination] ?: 0) - 1)
+                },
+                LinearLayout.LayoutParams(dp(42), dp(42))
+            )
 
-            val input = EditText(this).apply {
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText("0")
-                textSize = 17f
+            val quantity = EditText(this).apply {
+                setTextColor(white)
+                setHintTextColor(muted)
+                hint = "0"
                 gravity = Gravity.CENTER
+                inputType = 2
                 setSingleLine(true)
-                filters = arrayOf(android.text.InputFilter.LengthFilter(6))
-                addTextChangedListener(watcher {
-                    counts[value] = (it.toIntOrNull() ?: 0).coerceIn(0, 999999)
-                    refresh()
-                })
+                setText((counts[denomination] ?: 0).toString())
+                setPadding(0, 0, 0, 0)
+                setBackgroundColor(Color.rgb(35, 50, 70))
             }
+            inputs[denomination] = quantity
 
-            inputs[value] = input
-            row.addView(input, LinearLayout.LayoutParams(dp(82), dp(48)))
-
-            row.addView(button("+") {
-                setCount(value, (counts[value] ?: 0) + 1)
-            })
-
-            body.addView(row)
-            val gap = TextView(this)
-            gap.height = dp(3)
-            body.addView(gap)
-        }
-
-        body.addView(section("2. EXTRA AMOUNT COMPARISON"))
-
-        extraInput = EditText(this).apply {
-            hint = "Enter Extra Amount (₹)"
-            inputType = InputType.TYPE_CLASS_NUMBER or
-                    InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setSingleLine(true)
-            setText("0")
-            textSize = 17f
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setBackgroundColor(-1)
-            addTextChangedListener(watcher {
-                extra = (it.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+            quantity.addTextChangedListener(watcher {
+                counts[denomination] =
+                    quantity.text.toString().toIntOrNull()?.coerceAtLeast(0) ?: 0
                 refresh()
             })
-        }
-        body.addView(extraInput)
 
-        comparisonText = text("EQUAL TO", 20f, true)
-        body.addView(comparisonText)
+            row.addView(
+                quantity,
+                LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+                    setMargins(dp(5), 0, dp(5), 0)
+                }
+            )
 
-        body.addView(text(
-            "तुलना Denomination Total और Extra Amount के बीच होगी।"
-        ))
+            row.addView(
+                makeButton("+") {
+                    setCount(denomination, (counts[denomination] ?: 0) + 1)
+                },
+                LinearLayout.LayoutParams(dp(42), dp(42))
+            )
 
-        body.addView(section("3. INDEPENDENT CALCULATOR"))
-        body.addView(text(
-            "यह Calculator Cash Counter से अलग काम करता है।"
-        ))
-        body.addView(button("OPEN CALCULATOR") {
-            openCalculator()
-        })
+            val amount = makeText("₹0", 13f, emerald, true)
+            amount.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            amountLabels[denomination] = amount
+            row.addView(
+                amount,
+                LinearLayout.LayoutParams(dp(76), dp(42))
+            )
 
-        body.addView(section("4. HANDWRITTEN DENOMINATION SCANNER"))
-        body.addView(text(
-            "उदाहरण: 500 - 10, 200 × 5 या दो कॉलम की सूची"
-        ))
-        body.addView(button("SELECT HANDWRITTEN LIST PHOTO") {
-            selectImage()
-        })
-
-        body.addView(section("5. SAVE AND HISTORY"))
-        body.addView(button("SAVE CASH COUNT") {
-            saveCount()
-        })
-        body.addView(button("VIEW HISTORY") {
-            showHistory()
-        })
-        body.addView(button("COPY GRAND TOTAL") {
-            val clipboard = getSystemService(CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-            clipboard.setPrimaryClip(
-                android.content.ClipData.newPlainText(
-                    "Grand Total", "₹${grandTotal()}"
+            denominationCard.addView(row)
+            val line = View(this).apply {
+                setBackgroundColor(Color.rgb(48, 63, 82))
+            }
+            denominationCard.addView(
+                line,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
                 )
             )
-            Toast.makeText(this, "Total copied", Toast.LENGTH_SHORT).show()
-        })
-        body.addView(button("CLEAR ALL") {
-            clearAll()
-        })
+        }
 
-        body.addView(text(
-            "₹2,000 denomination is excluded.",
-            12f
-        ))
+        page.addView(denominationCard)
+        addSpace(page)
 
-        scroll.addView(body)
-        page.addView(
-            scroll,
-            LinearLayout.LayoutParams(-1, 0, 1f)
+        val tools = makeCard()
+        tools.addView(makeText("CASH TOOLS", 14f, emerald, true))
+
+        val toolRow1 = LinearLayout(this)
+        toolRow1.addView(
+            makeButton("SCAN NOTES") { selectImage() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
         )
-        setContentView(page)
+        toolRow1.addView(
+            makeButton("SAVE COUNT") { saveCount() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        tools.addView(toolRow1)
+
+        addSpace(tools, 6)
+
+        val toolRow2 = LinearLayout(this)
+        toolRow2.addView(
+            makeButton("HISTORY") { showHistory() },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        toolRow2.addView(
+            makeButton("COPY TOTAL") {
+                val clip = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clip.setPrimaryClip(
+                    android.content.ClipData.newPlainText(
+                        "Cash Total", denominationTotal().toString()
+                    )
+                )
+                Toast.makeText(this, "Total copied", Toast.LENGTH_SHORT).show()
+            },
+            LinearLayout.LayoutParams(0, dp(48), 1f)
+        )
+        tools.addView(toolRow2)
+
+        addSpace(tools, 6)
+        tools.addView(
+            makeButton("CLEAR ALL") {
+                AlertDialog.Builder(this)
+                    .setTitle("Clear all?")
+                    .setMessage("All denomination counts and extra amount will be cleared.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Clear") { _, _ ->
+                        denominations.forEach { setCount(it, 0) }
+                        extraInput.setText("0")
+                    }.show()
+            }
+        )
+        page.addView(tools)
+
+        refresh()
     }
 
-    private fun watcher(action: (String) -> Unit): TextWatcher {
-        return object : TextWatcher {
-            override fun beforeTextChanged(
-                s: CharSequence?, start: Int, count: Int, after: Int
-            ) {}
+    private fun showCalculator() {
+        currentScreen = "CALC"
+        content.removeAllViews()
 
-            override fun onTextChanged(
-                s: CharSequence?, start: Int, before: Int, count: Int
-            ) {
-                action(s?.toString() ?: "")
+        val scroll = ScrollView(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        scroll.addView(page)
+        content.addView(scroll)
+
+        val card = makeCard()
+        card.addView(makeText("SMART CALCULATOR", 18f, emerald, true))
+        addSpace(card)
+
+        val first = numberInput("First amount")
+        val second = numberInput("Second amount")
+        card.addView(first)
+        addSpace(card, 8)
+        card.addView(second)
+        addSpace(card)
+
+        val operator = Spinner(this)
+        operator.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            listOf("Addition (+)", "Subtraction (−)", "Multiplication (×)", "Division (÷)", "Percentage (%)")
+        )
+        card.addView(operator)
+        addSpace(card)
+
+        val resultText = makeText("Result: ₹0", 23f, emerald, true)
+        card.addView(resultText)
+
+        card.addView(
+            makeButton("CALCULATE") {
+                val a = first.text.toString().toDoubleOrNull() ?: 0.0
+                val b = second.text.toString().toDoubleOrNull() ?: 0.0
+                calculatorResult = when (operator.selectedItemPosition) {
+                    0 -> a + b
+                    1 -> a - b
+                    2 -> a * b
+                    3 -> if (b == 0.0) Double.NaN else a / b
+                    else -> a * b / 100.0
+                }
+                resultText.text =
+                    if (calculatorResult.isNaN()) "Cannot divide by zero"
+                    else "Result: ₹${format(calculatorResult)}"
             }
+        )
 
+        addSpace(card)
+        card.addView(
+            makeButton("ADD RESULT TO EXTRA AMOUNT") {
+                if (!calculatorResult.isNaN() && calculatorResult.isFinite()) {
+                    extra += calculatorResult
+                    Toast.makeText(this, "Result added to Extra Amount", Toast.LENGTH_SHORT).show()
+                    showCounter()
+                }
+            }
+        )
+        page.addView(card)
+
+        addSpace(page)
+        val gst = makeCard()
+        gst.addView(makeText("GST QUICK CALCULATOR", 16f, emerald, true))
+        gst.addView(makeText("Enter base amount above, then select GST", 12f, muted))
+        addSpace(gst)
+
+        val gstRow1 = LinearLayout(this)
+        listOf(3, 5, 12).forEach { rate ->
+            gstRow1.addView(
+                makeButton("+$rate%") {
+                    val amount = first.text.toString().toDoubleOrNull() ?: 0.0
+                    calculatorResult = amount * (1 + rate / 100.0)
+                    resultText.text = "With $rate% GST: ₹${format(calculatorResult)}"
+                },
+                LinearLayout.LayoutParams(0, dp(46), 1f)
+            )
+        }
+        gst.addView(gstRow1)
+
+        val gstRow2 = LinearLayout(this)
+        listOf(18, 28).forEach { rate ->
+            gstRow2.addView(
+                makeButton("+$rate%") {
+                    val amount = first.text.toString().toDoubleOrNull() ?: 0.0
+                    calculatorResult = amount * (1 + rate / 100.0)
+                    resultText.text = "With $rate% GST: ₹${format(calculatorResult)}"
+                },
+                LinearLayout.LayoutParams(0, dp(46), 1f)
+            )
+        }
+        gstRow2.addView(
+            makeButton("REMOVE GST") {
+                val amount = first.text.toString().toDoubleOrNull() ?: 0.0
+                val rate = second.text.toString().toDoubleOrNull() ?: 18.0
+                calculatorResult =
+                    if (rate <= 0) amount else amount * 100.0 / (100.0 + rate)
+                resultText.text = "Before GST: ₹${format(calculatorResult)}"
+            },
+            LinearLayout.LayoutParams(0, dp(46), 1f)
+        )
+        gst.addView(gstRow2)
+        page.addView(gst)
+    }
+
+    private fun numberInput(hintText: String): EditText {
+        return EditText(this).apply {
+            hint = hintText
+            setHintTextColor(muted)
+            setTextColor(white)
+            inputType = 8194
+            setSingleLine(true)
+            setPadding(dp(10), 0, dp(10), 0)
+            setBackgroundColor(Color.rgb(35, 50, 70))
+        }
+    }
+
+    private fun watcher(action: () -> Unit): TextWatcher {
+        return object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                action()
+            }
             override fun afterTextChanged(s: Editable?) {}
         }
     }
 
-    private fun setCount(value: Int, number: Int) {
-        val n = number.coerceIn(0, 999999)
-        counts[value] = n
-        inputs[value]?.setText(n.toString())
-        inputs[value]?.setSelection(inputs[value]?.text?.length ?: 0)
+    private fun setCount(denomination: Int, value: Int) {
+        val safeValue = value.coerceAtLeast(0)
+        counts[denomination] = safeValue
+        val field = inputs[denomination]
+        if (field != null && field.text.toString() != safeValue.toString()) {
+            field.setText(safeValue.toString())
+        }
         refresh()
     }
 
@@ -269,92 +481,94 @@ class MainActivity : Activity() {
         denominationTotal().toDouble() + extra
 
     private fun refresh() {
-        val denTotal = denominationTotal()
-        totalText.text = "₹${"%.2f".format(Locale.US, grandTotal())}"
-        denominationText.text = "Denomination Total: ₹$denTotal"
+        if (!::totalText.isInitialized) return
 
-        val comparison = when {
-            denTotal.toDouble() > extra -> "GREATER THAN"
-            denTotal.toDouble() < extra -> "LESS THAN"
-            else -> "EQUAL TO"
+        denominations.forEach { denomination ->
+            val quantity = counts[denomination] ?: 0
+            amountLabels[denomination]?.text =
+                "₹${format(denomination.toLong() * quantity)}"
         }
 
-        comparisonText.text = comparison
-        comparisonText.setTextColor(
-            when (comparison) {
-                "GREATER THAN" -> 0xFF168044.toInt()
-                "LESS THAN" -> 0xFFC0392B.toInt()
-                else -> 0xFF245A9A.toInt()
+        val total = denominationTotal()
+        val notes = denominations.sumOf { counts[it] ?: 0 }
+
+        totalText.text = "₹${format(total)}"
+        notesText.text = "Total Notes: $notes"
+
+        if (::comparisonText.isInitialized) {
+            comparisonText.text = when {
+                total.toDouble() > extra -> "COMPARISON: GREATER THAN"
+                total.toDouble() < extra -> "COMPARISON: LESS THAN"
+                else -> "COMPARISON: EQUAL TO"
             }
-        )
+        }
+
+        if (::extraTotalText.isInitialized) {
+            extraTotalText.text = "Grand Total: ₹${format(grandTotal())}"
+        }
     }
 
-    private fun openCalculator() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(8), dp(18), dp(8))
+    private fun format(value: Number): String =
+        String.format(Locale.US, "%,.2f", value.toDouble())
+            .removeSuffix(".00")
+
+    private fun loadCounts() {
+        denominations.forEach {
+            counts[it] = prefs.getInt("count_$it", 0)
+        }
+        extra = prefs.getFloat("extra", 0f).toDouble()
+    }
+
+    private fun saveCount() {
+        val total = denominationTotal()
+        denominations.forEach {
+            prefs.edit().putInt("count_$it", counts[it] ?: 0).apply()
+        }
+        prefs.edit().putFloat("extra", extra.toFloat()).apply()
+
+        val history = JSONArray(prefs.getString("history", "[]"))
+        val entry = JSONObject()
+        entry.put("date", SimpleDateFormat("dd-MM-yyyy HH:mm", Locale.getDefault()).format(Date()))
+        entry.put("total", total)
+        entry.put("extra", extra)
+        entry.put("grand", grandTotal())
+
+        val detail = JSONObject()
+        denominations.forEach { detail.put(it.toString(), counts[it] ?: 0) }
+        entry.put("counts", detail)
+
+        history.put(entry)
+        prefs.edit().putString("history", history.toString()).apply()
+        Toast.makeText(this, "Count saved successfully", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showHistory() {
+        val history = JSONArray(prefs.getString("history", "[]"))
+        if (history.length() == 0) {
+            AlertDialog.Builder(this)
+                .setMessage("No saved entries yet.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
         }
 
-        val first = EditText(this).apply {
-            hint = "First number"
-            inputType = InputType.TYPE_CLASS_NUMBER or
-                    InputType.TYPE_NUMBER_FLAG_DECIMAL or
-                    InputType.TYPE_NUMBER_FLAG_SIGNED
+        val lines = StringBuilder()
+        for (i in history.length() - 1 downTo 0) {
+            val item = history.getJSONObject(i)
+            lines.append(item.optString("date")).append("\n")
+            lines.append("Cash: ₹").append(format(item.optDouble("total"))).append("\n")
+            lines.append("Extra: ₹").append(format(item.optDouble("extra"))).append("\n")
+            lines.append("Grand: ₹").append(format(item.optDouble("grand"))).append("\n\n")
         }
-
-        val second = EditText(this).apply {
-            hint = "Second number"
-            inputType = InputType.TYPE_CLASS_NUMBER or
-                    InputType.TYPE_NUMBER_FLAG_DECIMAL or
-                    InputType.TYPE_NUMBER_FLAG_SIGNED
-        }
-
-        val operator = Spinner(this)
-        operator.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            listOf("+", "−", "×", "÷", "%")
-        )
-
-        val result = text("Result: 0", 20f, true)
-        var answer = 0.0
-
-        layout.addView(first)
-        layout.addView(operator)
-        layout.addView(second)
-        layout.addView(button("CALCULATE") {
-            val a = first.text.toString().toDoubleOrNull() ?: 0.0
-            val b = second.text.toString().toDoubleOrNull() ?: 0.0
-
-            answer = when (operator.selectedItemPosition) {
-                0 -> a + b
-                1 -> a - b
-                2 -> a * b
-                3 -> if (b == 0.0) Double.NaN else a / b
-                else -> a * b / 100.0
-            }
-
-            result.text = if (answer.isFinite()) {
-                "Result: ${"%.2f".format(Locale.US, answer)}"
-            } else {
-                "Cannot divide by zero"
-            }
-        })
-        layout.addView(result)
-
-        layout.addView(button("ADD RESULT TO EXTRA AMOUNT") {
-            if (answer.isFinite()) {
-                val newExtra = extra + answer
-                if (newExtra >= 0) {
-                    extraInput.setText(newExtra.toString())
-                }
-            }
-        })
 
         AlertDialog.Builder(this)
-            .setTitle("Independent Calculator")
-            .setView(layout)
-            .setNegativeButton("Close", null)
+            .setTitle("Saved History")
+            .setMessage(lines.toString())
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Clear History") { _, _ ->
+                prefs.edit().putString("history", "[]").apply()
+                Toast.makeText(this, "History cleared", Toast.LENGTH_SHORT).show()
+            }
             .show()
     }
 
@@ -365,162 +579,65 @@ class MainActivity : Activity() {
         startActivityForResult(intent, 101)
     }
 
-    @Deprecated("Legacy image picker result")
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?
-    ) {
+    @Deprecated("Deprecated Android callback")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-
         if (requestCode == 101 && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
-            scanImage(uri)
-        }
-    }
-
-    private fun scanImage(uri: Uri) {
-        try {
-            val image = InputImage.fromFilePath(this, uri)
-            val recognizer = TextRecognition.getClient(
-                TextRecognizerOptions.DEFAULT_OPTIONS
-            )
-
-            Toast.makeText(this, "Reading image...", Toast.LENGTH_SHORT).show()
-
-            recognizer.process(image)
-                .addOnSuccessListener { result ->
-                    val found = mutableMapOf<Int, Int>()
-
-                    val pattern = Regex(
-                        """(500|200|100|50|20|10|5|2|1)\s*(?:[-xX×:]\s*|\s+)(\d{1,6})"""
-                    )
-
-                    result.text.lines().forEach { line ->
-                        pattern.findAll(line).forEach { match ->
-                            val denomination = match.groupValues[1].toInt()
-                            val quantity = match.groupValues[2].toIntOrNull() ?: 0
-                            if (denomination in denominations) {
-                                found[denomination] = quantity
-                            }
-                        }
+            try {
+                val image = InputImage.fromFilePath(this, uri)
+                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                recognizer.process(image)
+                    .addOnSuccessListener { result ->
+                        parseScan(result.text)
                     }
-
-                    if (found.isEmpty()) {
-                        AlertDialog.Builder(this)
-                            .setTitle("No denomination found")
-                            .setMessage(
-                                "Text could not be read clearly. Try a brighter, clearer photo with one entry per line."
-                            )
-                            .setPositiveButton("OK", null)
-                            .show()
-                    } else {
-                        showScanConfirmation(found, result.text)
+                    .addOnFailureListener {
+                        Toast.makeText(this, "Could not read image", Toast.LENGTH_LONG).show()
                     }
-                }
-                .addOnFailureListener {
-                    Toast.makeText(
-                        this,
-                        "Image reading failed: ${it.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                .addOnCompleteListener {
-                    recognizer.close()
-                }
-        } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "Could not open image: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Unable to open image", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
-    private fun showScanConfirmation(
-        found: Map<Int, Int>,
-        recognizedText: String
-    ) {
-        val message = buildString {
-            found.forEach { (denomination, quantity) ->
-                append("₹$denomination × $quantity\n")
-            }
-            append("\nPlease check the quantities before applying.")
-        }
+    private fun parseScan(text: String) {
+        val found = mutableMapOf<Int, Int>()
+        val pattern = Regex("""(500|200|100|50|20|10|5|2|1)\s*(?:[-xX×:]\s*|\s+)(\d{1,6})""")
 
-        AlertDialog.Builder(this)
-            .setTitle("Scanned denominations")
-            .setMessage(message)
-            .setPositiveButton("APPLY TO COUNTER") { _, _ ->
-                found.forEach { (denomination, quantity) ->
-                    setCount(denomination, quantity)
+        text.lines().forEach { line ->
+            val match = pattern.find(line)
+            if (match != null) {
+                val denomination = match.groupValues[1].toInt()
+                val quantity = match.groupValues[2].toIntOrNull() ?: 0
+                if (denomination in denominations) {
+                    found[denomination] = quantity
                 }
             }
-            .setNeutralButton("SHOW RECOGNIZED TEXT") { _, _ ->
-                AlertDialog.Builder(this)
-                    .setTitle("Recognized text")
-                    .setMessage(recognizedText)
-                    .setPositiveButton("OK", null)
-                    .show()
-            }
-            .setNegativeButton("CANCEL", null)
-            .show()
-    }
-
-    private fun saveCount() {
-        val history = JSONArray(prefs.getString("history", "[]"))
-        val record = org.json.JSONObject().apply {
-            put(
-                "date",
-                SimpleDateFormat(
-                    "dd MMM yyyy, hh:mm a",
-                    Locale.getDefault()
-                ).format(Date())
-            )
-            put("denominationTotal", denominationTotal())
-            put("extra", extra)
-            put("grandTotal", grandTotal())
-            put("counts", org.json.JSONObject().apply {
-                denominations.forEach { put(it.toString(), counts[it] ?: 0) }
-            })
         }
 
-        history.put(record)
-        prefs.edit().putString("history", history.toString()).apply()
-        Toast.makeText(this, "Cash count saved", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun showHistory() {
-        val history = JSONArray(prefs.getString("history", "[]"))
-
-        if (history.length() == 0) {
+        if (found.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle("History")
-                .setMessage("No saved records yet.")
+                .setTitle("No denominations found")
+                .setMessage("Try a clearer photo. Supported examples: 500 - 10 or 500 x 10.")
                 .setPositiveButton("OK", null)
                 .show()
             return
         }
 
-        val lines = (history.length() - 1 downTo 0).map { index ->
-            val item = history.getJSONObject(index)
-            "${item.optString("date")}\nGrand Total: ₹${item.optDouble("grandTotal")}"
+        val preview = found.entries.joinToString("\n") {
+            "₹${it.key}  ×  ${it.value}"
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Saved Cash History")
-            .setItems(lines.toTypedArray(), null)
-            .setPositiveButton("Close", null)
-            .setNeutralButton("Clear History") { _, _ ->
-                prefs.edit().putString("history", "[]").apply()
+            .setTitle("Recognized denominations")
+            .setMessage(preview + "\n\nApply these quantities?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Apply") { _, _ ->
+                found.forEach { (denomination, quantity) ->
+                    setCount(denomination, quantity)
+                }
+                Toast.makeText(this, "Scanner values applied", Toast.LENGTH_SHORT).show()
             }
             .show()
-    }
-
-    private fun clearAll() {
-        denominations.forEach { setCount(it, 0) }
-        extraInput.setText("0")
-        extra = 0.0
-        refresh()
     }
 }
